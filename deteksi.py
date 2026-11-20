@@ -1,9 +1,14 @@
-from ultralytics import YOLO
+import argparse
+from pathlib import Path
+
 import cv2
+from ultralytics import YOLO
+
 
 # key = nama kelas COCO, value = label yang ditampilkan
 ELEKTRONIK = {
-    "tv": "TV",
+    "watch": "Jam Tangan",
+    "tvmonitor": "TV",
     "laptop": "Laptop",
     "cell phone": "Handphone",
     "mouse": "Mouse",
@@ -18,37 +23,87 @@ ELEKTRONIK = {
 
 HIJAU = (0, 200, 0)
 
-model = YOLO("yolov8n.pt")
-kamera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-if not kamera.isOpened():
-    raise SystemExit("Coba index 1 atau tutup aplikasi lain yang menggunakan kamera.")
 
-while True:
-    berhasil, frame = kamera.read()
-    if not berhasil:
-        break
+def deteksi_elektronik(model, frame, confidence):
+    hasil = model(frame, conf=confidence, verbose=False)
+    deteksi = []
 
-    hasil = model(frame, conf=0.25, verbose=False)
-
-    jumlah = 0
     for kotak in hasil[0].boxes:
-        nama = model.names[int(kotak.cls[0])]
+        class_id = int(kotak.cls.item())
+        nama = model.names[class_id]
         if nama not in ELEKTRONIK:
             continue
 
-        jumlah += 1
-        yakin = float(kotak.conf[0])
-        x1, y1, x2, y2 = map(int, kotak.xyxy[0].tolist())
-        cv2.rectangle(frame, (x1, y1), (x2, y2), HIJAU, 2)
-        cv2.putText(frame, f"{ELEKTRONIK[nama]} {yakin:.2f}", (x1, max(y1 - 8, 15)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, HIJAU, 2)
+        deteksi.append({
+            "nama": ELEKTRONIK[nama],
+            "confidence": float(kotak.conf.item()),
+            "box": kotak.xyxy[0].int().tolist(),
+        })
 
-    cv2.putText(frame, f"Elektronik terdeteksi: {jumlah}", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    return deteksi
 
-    cv2.imshow("Webcam", frame)
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
+def main():
+    parser = argparse.ArgumentParser(
+        description="Deteksi perangkat elektronik menggunakan kamera."
+    )
+    parser.add_argument("--camera", type=int, default=0, help="Index kamera")
+    parser.add_argument(
+        "--confidence",
+        type=float,
+        default=0.25,
+        help="Ambang batas confidence deteksi",
+    )
+    args = parser.parse_args()
 
-kamera.release()
-cv2.destroyAllWindows()
+    base_dir = Path(__file__).resolve().parent
+    model = YOLO(str(base_dir / "yolov8n.pt"))
+    kamera = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW)
+
+    if not kamera.isOpened():
+        print(
+            f"Kamera index {args.camera} tidak dapat dibuka. "
+            "Coba index lain atau tutup aplikasi lain yang menggunakan kamera."
+        )
+        return
+
+    try:
+        while True:
+            berhasil, frame = kamera.read()
+            if not berhasil:
+                print("Gagal membaca frame dari kamera.")
+                break
+
+            deteksi = deteksi_elektronik(model, frame, args.confidence)
+
+            for item in deteksi:
+                x1, y1, x2, y2 = item["box"]
+                cv2.rectangle(frame, (x1, y1), (x2, y2), HIJAU, 2)
+                cv2.putText(
+                    frame,
+                    f"{item['nama']} {item['confidence']:.2f}",
+                    (x1, max(y1 - 8, 15)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    HIJAU,
+                    2,
+                )
+
+            cv2.putText(
+                frame,
+                f"Elektronik terdeteksi: {len(deteksi)}",
+                (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
+
+            cv2.imshow("Deteksi Elektronik", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+    finally:
+        kamera.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
