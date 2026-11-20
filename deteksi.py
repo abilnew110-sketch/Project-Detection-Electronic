@@ -1,14 +1,12 @@
 import argparse
+from collections import Counter
 from pathlib import Path
 
 import cv2
 from ultralytics import YOLO
 
-
-# key = nama kelas COCO, value = label yang ditampilkan
 ELEKTRONIK = {
-    "watch": "Jam Tangan",
-    "tvmonitor": "TV",
+    "tv": "TV",
     "laptop": "Laptop",
     "cell phone": "Handphone",
     "mouse": "Mouse",
@@ -22,7 +20,6 @@ ELEKTRONIK = {
 }
 
 HIJAU = (0, 200, 0)
-
 
 def deteksi_elektronik(model, frame, confidence):
     hasil = model(frame, conf=confidence, verbose=False)
@@ -74,6 +71,7 @@ def main():
                 break
 
             deteksi = deteksi_elektronik(model, frame, args.confidence)
+            jumlah_per_nama = Counter(item["nama"] for item in deteksi)
 
             for item in deteksi:
                 x1, y1, x2, y2 = item["box"]
@@ -97,6 +95,19 @@ def main():
                 (255, 255, 255),
                 2,
             )
+
+            posisi_y = 50
+            for nama, jumlah in jumlah_per_nama.items():
+                cv2.putText(
+                    frame,
+                    f"{nama}: {jumlah}",
+                    (10, posisi_y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 255, 255),
+                    2,
+                )
+                posisi_y += 25
 
             cv2.imshow("Deteksi Elektronik", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
