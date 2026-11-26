@@ -1,24 +1,78 @@
 import argparse
 from collections import Counter
 from datetime import datetime
+import math
 from pathlib import Path
 import time
 
 import cv2
-from ultralytics import YOLO
+from ultralytics import YOLOWorld
 
-ELEKTRONIK = {
-    "tv": "TV",
-    "laptop": "Laptop",
-    "cell phone": "Handphone",
-    "mouse": "Mouse",
-    "keyboard": "Keyboard",
-    "remote": "Remote",
+PROMPT_KE_NAMA = {
+    "television": "TV",
+    "laptop computer": "Laptop",
+    "smartphone": "Handphone",
+    "computer keyboard": "Keyboard",
+    "computer mouse": "Mouse",
+    "remote control": "Remote",
+    "headphones": "Headphone",
+    "wireless earbuds": "Earbud Nirkabel",
+    "tablet": "Tablet",
+    "smartwatch": "Smartwatch",
+    "digital camera": "Kamera Digital",
+    "desktop computer": "Komputer Desktop",
+    "computer monitor": "Monitor",
+    "computer server": "Server",
+    "printer": "Printer",
+    "scanner": "Pemindai",
+    "computer router": "Router",
+    "computer speaker": "Speaker",
+    "projector": "Proyektor",
+    "hard drive": "Hard Disk",
+    "circuit board": "Papan Sirkuit",
+    "computer motherboard": "Motherboard",
     "refrigerator": "Kulkas",
-    "microwave": "Microwave",
-    "oven": "Oven",
+    "washing machine": "Mesin Cuci",
+    "clothes dryer": "Pengering Pakaian",
+    "microwave oven": "Microwave",
+    "conventional oven": "Oven",
+    "electric stove": "Kompor Listrik",
+    "induction cooktop": "Kompor Induksi",
+    "pedestal fan": "Kipas Angin",
+    "electric fan": "Kipas Angin",
+    "vacuum cleaner": "Penyedot Debu",
+    "blender": "Blender",
+    "food processor": "Food Processor",
+    "stand mixer": "Mixer Berdiri",
+    "hand mixer": "Mixer Tangan",
+    "immersion blender": "Blender Tangan",
+    "electric kettle": "Ketel Listrik",
+    "coffee maker": "Mesin Kopi",
+    "espresso machine": "Mesin Espresso",
+    "coffee grinder": "Penggiling Kopi",
+    "meat grinder": "Penggiling Daging",
+    "rice cooker": "Penanak Nasi",
+    "electric rice cooker": "Penanak Nasi",
+    "electric pressure cooker": "Panci Tekanan Listrik",
+    "slow cooker": "Slow Cooker",
     "toaster": "Toaster",
-    "hair drier": "Pengering Rambut",
+    "electric iron": "Setrika",
+    "hair dryer": "Pengering Rambut",
+    "water dispenser": "Dispenser Air",
+    "water cooler": "Dispenser Air",
+    "portable air cooler": "Pendingin Udara Portabel",
+    "air conditioner": "AC",
+    "air purifier": "Pembersih Udara",
+    "humidifier": "Humidifier",
+    "electric heater": "Pemanas Listrik",
+    "air fryer": "Air Fryer",
+    "dishwasher": "Mesin Cuci Piring",
+    "electric grill": "Pemanggang Listrik",
+    "electric sandwich maker": "Pembuat Sandwich",
+    "bread maker": "Pembuat Roti",
+    "emergency light": "Lampu Darurat",
+    "water heater": "Pemanas Air",
+    "range hood": "Penghisap Asap Dapur",
 }
 
 WATT_PERANGKAT = {
@@ -66,30 +120,29 @@ def hitung_iou(box_a, box_b):
     return luas_irisan / (luas_a + luas_b - luas_irisan)
 
 
-def deteksi_elektronik(model, frame, confidence):
-    hasil = model(frame, conf=confidence, verbose=False)
+def deteksi_elektronik(model, frame, confidence, imgsz):
+    hasil = model(frame, conf=confidence, imgsz=imgsz, verbose=False)
     deteksi = []
 
     for kotak in hasil[0].boxes:
         class_id = int(kotak.cls.item())
-        nama = model.names[class_id]
-        if nama not in ELEKTRONIK:
+        prompt = str(model.names[class_id]).lower()
+        nama = PROMPT_KE_NAMA.get(prompt)
+        if nama is None:
             continue
 
         deteksi.append({
-            "nama": ELEKTRONIK[nama],
+            "nama": nama,
             "confidence": float(kotak.conf.item()),
             "box": kotak.xyxy[0].int().tolist(),
         })
 
-    # Beberapa kotak YOLO dari objek yang sama dapat menghasilkan duplikat.
-    # Simpan kotak terbaik dari setiap objek yang sangat bertumpang tindih.
     deteksi = sorted(deteksi, key=lambda item: item["confidence"], reverse=True)
     deteksi_unik = []
     for item in deteksi:
         duplikat = any(
-            item["nama"] == item_lain["nama"]
-            and hitung_iou(item["box"], item_lain["box"]) >= 0.45
+            hitung_iou(item["box"], item_lain["box"])
+            >= (0.50 if item["nama"] == item_lain["nama"] else 0.80)
             for item_lain in deteksi_unik
         )
         if not duplikat:
@@ -103,6 +156,7 @@ def hitung_daya(deteksi, jam):
     total_watt = sum(
         WATT_PERANGKAT[nama][1] * FAKTOR_PEMAKAIAN[nama] * jumlah
         for nama, jumlah in jumlah_per_nama.items()
+        if nama in WATT_PERANGKAT and nama in FAKTOR_PEMAKAIAN
     )
     return jumlah_per_nama, total_watt, total_watt * jam / 1000
 
@@ -129,6 +183,10 @@ def ringkasan_kamera(jumlah_maksimum, durasi_detik):
         )
 
     for nama, jumlah in sorted(jumlah_maksimum.items()):
+        if nama not in WATT_PERANGKAT or nama not in FAKTOR_PEMAKAIAN:
+            baris.append(f"- {nama}: {jumlah} perangkat, data daya belum tersedia")
+            continue
+
         nilai_min, nilai_umum, nilai_max = WATT_PERANGKAT[nama]
         rata_rata = nilai_umum * FAKTOR_PEMAKAIAN[nama]
         minimum = nilai_min * jumlah
@@ -152,6 +210,7 @@ def ringkasan_kamera(jumlah_maksimum, durasi_detik):
         *baris,
         "",
         f"Durasi kamera aktif: {durasi_detik:.1f} detik ({durasi_jam:.4f} jam)",
+        "Catatan: total daya hanya mencakup perangkat dengan data watt.",
         f"Total minimum perkiraan: {total_minimum:.0f} W",
         f"Total nilai umum perkiraan: {total_umum:.0f} W",
         f"Total maksimum perkiraan: {total_maksimum:.0f} W",
@@ -171,20 +230,37 @@ def ringkasan_kamera(jumlah_maksimum, durasi_detik):
 
 def gambarkan_hasil(frame, deteksi, jam):
     jumlah_per_nama, total_watt, total_kwh = hitung_daya(deteksi, jam)
+    tinggi_frame, lebar_frame = frame.shape[:2]
 
     for item in deteksi:
         x1, y1, x2, y2 = item["box"]
         nama = item["nama"]
-        nilai_min, watt, nilai_max = WATT_PERANGKAT[nama]
+        label = f"{nama} {item['confidence']:.2f}"
+        ukuran_teks, garis_dasar = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1
+        )[0], 3
+        lebar_teks, tinggi_teks = ukuran_teks
+        posisi_x = max(0, min(x1, lebar_frame - lebar_teks - 6))
+        posisi_y = y1 - 5
+        if posisi_y - tinggi_teks - garis_dasar < 0:
+            posisi_y = min(y1 + tinggi_teks + garis_dasar + 5, tinggi_frame - 4)
+
         cv2.rectangle(frame, (x1, y1), (x2, y2), HIJAU, 2)
+        cv2.rectangle(
+            frame,
+            (posisi_x, max(0, posisi_y - tinggi_teks - garis_dasar - 2)),
+            (posisi_x + lebar_teks + 6, posisi_y + garis_dasar + 2),
+            (0, 100, 0),
+            -1,
+        )
         cv2.putText(
             frame,
-            f"{nama} {item['confidence']:.2f} ({watt:.0f} W umum)",
-            (x1, max(y1 - 8, 15)),
+            label,
+            (posisi_x + 3, posisi_y),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            HIJAU,
-            2,
+            0.45,
+            PUTIH,
+            1,
         )
 
     cv2.putText(
@@ -197,31 +273,25 @@ def gambarkan_hasil(frame, deteksi, jam):
         2,
     )
 
-    posisi_y = 50
-    for nama, jumlah in jumlah_per_nama.items():
-        watt_rata_rata = (
-            WATT_PERANGKAT[nama][1] * FAKTOR_PEMAKAIAN[nama] * jumlah
+    if jumlah_per_nama:
+        perangkat_tanpa_daya = sum(
+            jumlah for nama, jumlah in jumlah_per_nama.items()
+            if nama not in WATT_PERANGKAT
+        )
+        teks_daya = (
+            f"{total_watt:.0f} W | {total_kwh:.2f} kWh/{jam:g} jam"
+            if perangkat_tanpa_daya == 0
+            else f"Data watt belum tersedia untuk {perangkat_tanpa_daya} perangkat"
         )
         cv2.putText(
             frame,
-            f"{nama}: {jumlah} (~{watt_rata_rata:.0f} W rata-rata)",
-            (10, posisi_y),
+            teks_daya,
+            (10, 50),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
-            PUTIH,
+            MERAH,
             2,
         )
-        posisi_y += 25
-
-    cv2.putText(
-        frame,
-        f"Perkiraan: {total_watt:.0f} W rata-rata | {total_kwh:.2f} kWh / {jam:g} jam",
-        (10, posisi_y),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        MERAH,
-        2,
-    )
 
     return jumlah_per_nama, total_watt, total_kwh
 
@@ -251,16 +321,36 @@ def main():
     parser.add_argument(
         "--confidence",
         type=float,
-        default=0.25,
+        default=0.30,
         help="Ambang batas confidence deteksi",
+    )
+    parser.add_argument(
+        "--imgsz",
+        type=int,
+        default=640,
+        help="Ukuran input model; nilai lebih besar dapat membantu objek kecil",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="yolov8s-worldv2.pt",
+        help="Path bobot YOLO-World (bobot default diunduh otomatis oleh Ultralytics)",
     )
     args = parser.parse_args()
 
-    if args.hours <= 0:
-        parser.error("--hours harus lebih besar dari 0")
+    if not math.isfinite(args.hours) or args.hours <= 0:
+        parser.error("--hours harus berupa angka hingga yang lebih besar dari 0")
+    if not math.isfinite(args.confidence) or not 0 < args.confidence <= 1:
+        parser.error("--confidence harus berada di antara 0 dan 1")
+    if args.imgsz <= 0:
+        parser.error("--imgsz harus lebih besar dari 0")
 
     base_dir = Path(__file__).resolve().parent
-    model = YOLO(str(base_dir / "yolov8n.pt"))
+    model_path = Path(args.model)
+    if not model_path.is_absolute():
+        model_path = base_dir / model_path
+    model = YOLOWorld(str(model_path))
+    model.set_classes(list(PROMPT_KE_NAMA))
 
     if args.image:
         sumber = Path(args.image)
@@ -293,15 +383,19 @@ def main():
                 print(f"Gagal membaca gambar: {gambar}")
                 continue
 
-            deteksi = deteksi_elektronik(model, frame, args.confidence)
+            deteksi = deteksi_elektronik(model, frame, args.confidence, args.imgsz)
             jumlah, watt, kwh = gambarkan_hasil(frame, deteksi, args.hours)
             output_path = output_dir / f"{gambar.stem}_deteksi.jpg"
-            cv2.imwrite(str(output_path), frame)
+            if not cv2.imwrite(str(output_path), frame):
+                raise OSError(f"Gagal menyimpan hasil deteksi: {output_path}")
 
             print(f"\n{gambar.name}:")
             if not jumlah:
                 print("  Tidak ada perangkat elektronik yang dikenali.")
             for nama, count in jumlah.items():
+                if nama not in WATT_PERANGKAT:
+                    print(f"  {nama}: {count} (data daya belum tersedia)")
+                    continue
                 nilai_min, nilai_umum, nilai_max = WATT_PERANGKAT[nama]
                 rata_rata = nilai_umum * FAKTOR_PEMAKAIAN[nama] * count
                 print(
@@ -309,10 +403,15 @@ def main():
                     f"(rentang {nilai_min * count:.0f}-{nilai_max * count:.0f} W; "
                     f"rata-rata pemakaian ~{rata_rata:.0f} W)"
                 )
-            print(
-                f"  Total perkiraan: {watt:.0f} W rata-rata / "
-                f"{kwh:.2f} kWh untuk {args.hours:g} jam"
-            )
+            ada_data_watt = any(nama in WATT_PERANGKAT for nama in jumlah)
+            if ada_data_watt:
+                print(
+                    f"  Total perkiraan perangkat dengan data watt: "
+                    f"{watt:.0f} W rata-rata / {kwh:.2f} kWh "
+                    f"untuk {args.hours:g} jam"
+                )
+            elif jumlah:
+                print("  Total daya tidak dihitung karena data watt belum tersedia.")
             print(f"  Hasil tersimpan: {output_path}")
         return
 
@@ -340,7 +439,7 @@ def main():
                 print("Gagal membaca frame dari kamera.")
                 break
 
-            deteksi = deteksi_elektronik(model, frame, args.confidence)
+            deteksi = deteksi_elektronik(model, frame, args.confidence, args.imgsz)
             frame_terakhir = frame.copy()
             jumlah_frame, _, _ = hitung_daya(deteksi, 1)
             for nama, jumlah in jumlah_frame.items():
@@ -352,7 +451,7 @@ def main():
                 break
     finally:
         durasi_detik = time.monotonic() - waktu_mulai
-        ringkasan, data = ringkasan_kamera(jumlah_maksimum, durasi_detik)
+        ringkasan, _ = ringkasan_kamera(jumlah_maksimum, durasi_detik)
         waktu_selesai = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_ringkasan = output_dir / f"ringkasan_kamera_{waktu_selesai}.txt"
         file_ringkasan.write_text(
@@ -361,7 +460,8 @@ def main():
             "========================================\n\n"
             f"{ringkasan}\n\n"
             "Catatan: Watt dan kWh merupakan perkiraan rata-rata karena model "
-            "tidak mengetahui spesifikasi daya asli perangkat.\n",
+            "tidak mengetahui spesifikasi daya asli perangkat. Perangkat tanpa "
+            "data watt tidak disertakan dalam total daya.\n",
             encoding="utf-8",
         )
         if frame_terakhir is not None:

@@ -1,0 +1,17 @@
+KESIMPULAN DETEKSI DAN PERKIRAAN DAYA
+Dicatat: 2026-11-26 15:03:34
+========================================
+
+PERANGKAT TERDETEKSI SELAMA KAMERA HIDUP
+- Handphone: 1 perangkat, rentang 5-25 W, rata-rata penggunaan ~1 W (nilai umum 10 W)
+- Microwave: 1 perangkat, rentang 700-1500 W, rata-rata penggunaan ~240 W (nilai umum 1200 W)
+- TV: 1 perangkat, rentang 40-300 W, rata-rata penggunaan ~100 W (nilai umum 100 W)
+
+Durasi kamera aktif: 106.0 detik (0.0295 jam)
+Total minimum perkiraan: 745 W
+Total nilai umum perkiraan: 1310 W
+Total maksimum perkiraan: 1825 W
+TOTAL WATT RATA-RATA PERKIRAAN: 341 W
+Estimasi konsumsi selama sesi: 0.0100 kWh
+
+Catatan: Watt dan kWh merupakan perkiraan rata-rata karena model tidak mengetahui spesifikasi daya asli perangkat.
