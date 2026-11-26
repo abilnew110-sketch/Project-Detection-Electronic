@@ -1,8 +1,12 @@
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
 *.pt
 runs/
 outputs/
 datasets/
 .vscode/
+.idea/
+/images/
+/output/
+/gesture_recognizer.task
