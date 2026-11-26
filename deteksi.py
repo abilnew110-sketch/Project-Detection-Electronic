@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 
 import cv2
-from ultralytics import YOLOWorld
+from ultralytics import YOLO, YOLOWorld
 
 PROMPT_KE_NAMA = {
     "television": "TV",
@@ -75,6 +75,26 @@ PROMPT_KE_NAMA = {
     "range hood": "Penghisap Asap Dapur",
 }
 
+KELAS_KUSTOM_KE_NAMA = {
+    "blender": "Blender",
+    "camera": "Kamera Digital",
+    "fan": "Kipas Angin",
+    "headphones": "Headphone",
+    "keyboard": "Keyboard",
+    "laptop": "Laptop",
+    "microwave oven": "Microwave",
+    "mixer": "Mixer",
+    "mobile phone": "Handphone",
+    "monitor": "Monitor",
+    "mouse": "Mouse",
+    "printer": "Printer",
+    "refrigerator": "Kulkas",
+    "tv": "TV",
+    "tablet": "Tablet",
+    "toaster": "Toaster",
+    "washing machine": "Mesin Cuci",
+}
+
 WATT_PERANGKAT = {
     # minimum, daya penggunaan umum, maksimum/nominal
     "TV": (40, 100, 300),
@@ -120,14 +140,18 @@ def hitung_iou(box_a, box_b):
     return luas_irisan / (luas_a + luas_b - luas_irisan)
 
 
-def deteksi_elektronik(model, frame, confidence, imgsz):
-    hasil = model(frame, conf=confidence, imgsz=imgsz, verbose=False)
+def deteksi_elektronik(
+    model, frame, confidence, imgsz, kelas_ke_nama=PROMPT_KE_NAMA, device=None
+):
+    hasil = model(
+        frame, conf=confidence, imgsz=imgsz, device=device, verbose=False
+    )
     deteksi = []
 
     for kotak in hasil[0].boxes:
         class_id = int(kotak.cls.item())
         prompt = str(model.names[class_id]).lower()
-        nama = PROMPT_KE_NAMA.get(prompt)
+        nama = kelas_ke_nama.get(prompt)
         if nama is None:
             continue
 
@@ -276,7 +300,7 @@ def gambarkan_hasil(frame, deteksi, jam):
     if jumlah_per_nama:
         perangkat_tanpa_daya = sum(
             jumlah for nama, jumlah in jumlah_per_nama.items()
-            if nama not in WATT_PERANGKAT
+            if nama not in WATT_PERANGKAT or nama not in FAKTOR_PEMAKAIAN
         )
         teks_daya = (
             f"{total_watt:.0f} W | {total_kwh:.2f} kWh/{jam:g} jam"
@@ -333,8 +357,55 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        default="yolov8s-worldv2.pt",
-        help="Path bobot YOLO-World (bobot default diunduh otomatis oleh Ultralytics)",
+        default=None,
+        help="Path bobot model inferensi; default mengikuti --model-type.",
+    )
+    parser.add_argument(
+        "--model-type",
+        choices=("world", "custom"),
+        default="world",
+        help="Gunakan YOLO-World atau bobot YOLO kustom hasil pelatihan.",
+    )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Latih model YOLO kustom dari dataset Open Images yang disiapkan.",
+    )
+    parser.add_argument(
+        "--data",
+        type=str,
+        default="datasets/open_images_v6/yolo/data.yaml",
+        help="Path data.yaml untuk mode pelatihan.",
+    )
+    parser.add_argument(
+        "--base-model",
+        type=str,
+        default="yolov8n.pt",
+        help="Bobot awal YOLO untuk pelatihan kustom.",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=50,
+        help="Jumlah epoch pelatihan.",
+    )
+    parser.add_argument(
+        "--batch",
+        type=int,
+        default=8,
+        help="Ukuran batch pelatihan.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Jumlah worker pemuatan data saat pelatihan.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Perangkat pelatihan/inferensi, misalnya 0 atau cpu.",
     )
     args = parser.parse_args()
 
@@ -344,13 +415,60 @@ def main():
         parser.error("--confidence harus berada di antara 0 dan 1")
     if args.imgsz <= 0:
         parser.error("--imgsz harus lebih besar dari 0")
+    if args.epochs <= 0:
+        parser.error("--epochs harus lebih besar dari 0")
+    if args.batch <= 0:
+        parser.error("--batch harus lebih besar dari 0")
+    if args.workers < 0:
+        parser.error("--workers tidak boleh negatif")
 
     base_dir = Path(__file__).resolve().parent
-    model_path = Path(args.model)
-    if not model_path.is_absolute():
+    if args.train:
+        if args.image:
+            parser.error("--image tidak dapat digunakan bersama --train")
+        dataset_path = Path(args.data)
+        if not dataset_path.is_absolute():
+            dataset_path = base_dir / dataset_path
+        if not dataset_path.is_file():
+            parser.error(f"File data.yaml tidak ditemukan: {dataset_path}")
+
+        base_model_path = Path(args.base_model)
+        if not base_model_path.is_absolute():
+            base_model_path = base_dir / base_model_path
+        model = YOLO(str(base_model_path))
+        model.train(
+            data=str(dataset_path),
+            epochs=args.epochs,
+            imgsz=args.imgsz,
+            batch=args.batch,
+            workers=args.workers,
+            project=str(base_dir / "runs"),
+            name="electronics",
+            exist_ok=True,
+            device=args.device,
+        )
+        return
+
+    model_path = Path(args.model) if args.model else None
+    if model_path is not None and not model_path.is_absolute():
         model_path = base_dir / model_path
-    model = YOLOWorld(str(model_path))
-    model.set_classes(list(PROMPT_KE_NAMA))
+
+    if args.model_type == "custom":
+        if model_path is None:
+            model_path = base_dir / "runs" / "electronics" / "weights" / "best.pt"
+        if not model_path.is_file():
+            parser.error(
+                f"Bobot model kustom tidak ditemukan: {model_path}. "
+                "Latih dulu dengan --train."
+            )
+        model = YOLO(str(model_path))
+        kelas_ke_nama = KELAS_KUSTOM_KE_NAMA
+    else:
+        if model_path is None:
+            model_path = base_dir / "yolov8s-worldv2.pt"
+        model = YOLOWorld(str(model_path))
+        model.set_classes(list(PROMPT_KE_NAMA))
+        kelas_ke_nama = PROMPT_KE_NAMA
 
     if args.image:
         sumber = Path(args.image)
@@ -383,7 +501,14 @@ def main():
                 print(f"Gagal membaca gambar: {gambar}")
                 continue
 
-            deteksi = deteksi_elektronik(model, frame, args.confidence, args.imgsz)
+            deteksi = deteksi_elektronik(
+                model,
+                frame,
+                args.confidence,
+                args.imgsz,
+                kelas_ke_nama,
+                args.device,
+            )
             jumlah, watt, kwh = gambarkan_hasil(frame, deteksi, args.hours)
             output_path = output_dir / f"{gambar.stem}_deteksi.jpg"
             if not cv2.imwrite(str(output_path), frame):
@@ -403,7 +528,10 @@ def main():
                     f"(rentang {nilai_min * count:.0f}-{nilai_max * count:.0f} W; "
                     f"rata-rata pemakaian ~{rata_rata:.0f} W)"
                 )
-            ada_data_watt = any(nama in WATT_PERANGKAT for nama in jumlah)
+            ada_data_watt = any(
+                nama in WATT_PERANGKAT and nama in FAKTOR_PEMAKAIAN
+                for nama in jumlah
+            )
             if ada_data_watt:
                 print(
                     f"  Total perkiraan perangkat dengan data watt: "
@@ -439,7 +567,14 @@ def main():
                 print("Gagal membaca frame dari kamera.")
                 break
 
-            deteksi = deteksi_elektronik(model, frame, args.confidence, args.imgsz)
+            deteksi = deteksi_elektronik(
+                model,
+                frame,
+                args.confidence,
+                args.imgsz,
+                kelas_ke_nama,
+                args.device,
+            )
             frame_terakhir = frame.copy()
             jumlah_frame, _, _ = hitung_daya(deteksi, 1)
             for nama, jumlah in jumlah_frame.items():
