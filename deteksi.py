@@ -72,7 +72,7 @@ PROMPT_KE_NAMA = {
     "bread maker": "Pembuat Roti",
     "emergency light": "Lampu Darurat",
     "water heater": "Pemanas Air",
-    "range hood": "Penghisap Asap Dapur",
+    "range hood": "AC",
 }
 
 KELAS_KUSTOM_KE_NAMA = {
