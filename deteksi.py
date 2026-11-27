@@ -139,7 +139,6 @@ def hitung_iou(box_a, box_b):
     luas_b = max(1, box_b[2] - box_b[0]) * max(1, box_b[3] - box_b[1])
     return luas_irisan / (luas_a + luas_b - luas_irisan)
 
-
 def deteksi_elektronik(
     model, frame, confidence, imgsz, kelas_ke_nama=PROMPT_KE_NAMA, device=None
 ):
